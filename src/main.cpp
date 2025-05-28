@@ -34,8 +34,6 @@ Axis current_axis = AXIS_NONE;
 const char* axis_name = "NONE";
 
 int current_multiplier = 1;
-long step_counter = 0;
-
 
 volatile bool raw_estop_signal = false;
 volatile unsigned long last_estop_time = 0;
@@ -92,7 +90,6 @@ void check_encoder() {
     if (abs(count) >= 2) {
         pcnt_counter_clear(PCNT_UNIT);
         int detents = count / 2;
-        step_counter += detents;
         float step = detents * 0.001f * current_multiplier;
 
         uint8_t axis_mask = (current_axis == AXIS_X) ? 0x01 :
@@ -155,11 +152,11 @@ void loop() {
                 Serial.println("!");
 
                 // Send actual estop command characters
-                // grblSerial.write(0x8B);
-                // grblSerial.write(0x94);
+                grblSerial.write(0x8B);
+                grblSerial.write(0x94);
 
                 // Test for status response
-                grblSerial.write('?');
+                // grblSerial.write('?');
             }
         }
     }
@@ -171,7 +168,6 @@ void loop() {
             digitalWrite(LED_PIN, LOW);
             delay(250);
         }
-        step_counter = 0;
         digitalWrite(LED_PIN, LOW);
         pcnt_counter_clear(PCNT_UNIT);  // Clear any steps counted during estop
         mpg_state = IDLE;
@@ -187,7 +183,7 @@ void loop() {
         mpg_state = IDLE;
     }
 
-    // Always run encoder check to clear garbage when axis is NONE
+    // Always run to discard any movement, but only acts when state is READY and axis selected
     check_encoder();
 
 #if DEBUG_OUTPUT
