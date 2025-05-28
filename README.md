@@ -4,6 +4,8 @@ This is custom firmware for an ESP32-based manual pulse generator (MPG) pendant 
 
 It was written to allow usage of the relatively common MPG pendants with grblHAL. This was the one used for testing: https://www.amazon.com/dp/B07CZ7F3Y3/
 
+![photo of the hastily wired ESP32 and pendant](esp32-mpg-pendant.png "photo of the hastily wired ESP32 and pendant")
+
 ## Features
 
 - Quadrature encoder input using ESP32 PCNT hardware
