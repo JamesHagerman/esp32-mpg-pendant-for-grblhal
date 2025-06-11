@@ -20,6 +20,8 @@ HardwareSerial grblSerial(1);
 #define AXIS_A_PIN    22
 
 #define LED_PIN       2
+
+// COMMON_PIN powers the switch matrix for axis/multiplier — keep LOW to enable
 #define COMMON_PIN    4
 
 #define PCNT_UNIT     PCNT_UNIT_0
@@ -38,6 +40,10 @@ int current_multiplier = 1;
 volatile bool raw_estop_signal = false;
 volatile unsigned long last_estop_time = 0;
 const unsigned long debounce_delay = 50;  // ms
+
+static unsigned long last_blink_time = 0;
+static bool blink_on = false;
+const unsigned long blink_interval = 250;
 
 void setup_pcnt() {
     pcnt_config_t pcnt_config = {};
@@ -148,9 +154,6 @@ void loop() {
                     (current_axis == AXIS_A) ? "A" : "NONE";
     }
 
-    // Update LED status
-    digitalWrite(LED_PIN, current_axis != AXIS_NONE ? HIGH : LOW);
-
     if (raw_estop_signal) {
         raw_estop_signal = false;
         if (now - last_estop_time > debounce_delay) {
@@ -164,27 +167,33 @@ void loop() {
                 Serial.println("!");
 
                 // Send actual estop command characters
-                grblSerial.write(0x8B);
-                grblSerial.write(0x94);
+                // grblSerial.write(0x8B);
+                // grblSerial.write(0x94);
 
                 // Test for status response
-                // Serial.println("?");
-                // grblSerial.write('?');
+                grblSerial.write('?');
             }
         }
     }
 
+    // Update LED status
+    if (mpg_state != ESTOP) {
+        digitalWrite(LED_PIN, current_axis != AXIS_NONE ? HIGH : LOW);
+    }
     if (mpg_state == ESTOP) {
-        while (digitalRead(ESTOP_PIN) == HIGH) {
-            digitalWrite(LED_PIN, HIGH);
-            delay(250);
+        if (digitalRead(ESTOP_PIN) == LOW) {
+            // E-stop cleared
             digitalWrite(LED_PIN, LOW);
-            delay(250);
+            pcnt_counter_clear(PCNT_UNIT);
+            mpg_state = IDLE;
+        } else {
+            // Non-blocking LED blink
+            if (now - last_blink_time >= blink_interval) {
+                last_blink_time = now;
+                blink_on = !blink_on;
+                digitalWrite(LED_PIN, blink_on ? HIGH : LOW);
+            }
         }
-        digitalWrite(LED_PIN, LOW);
-        pcnt_counter_clear(PCNT_UNIT);  // Clear any steps counted during estop
-        mpg_state = IDLE;
-        return;
     }
 
     static Axis last_axis = AXIS_NONE;
