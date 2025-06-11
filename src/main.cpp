@@ -62,22 +62,6 @@ void IRAM_ATTR handle_estop() {
     raw_estop_signal = true;
 }
 
-void update_switches() {
-    bool axis_selected = false;
-
-    if (!digitalRead(MULT_X1_PIN)) current_multiplier = 1;
-    else if (!digitalRead(MULT_X10_PIN)) current_multiplier = 10;
-    else if (!digitalRead(MULT_X100_PIN)) current_multiplier = 100;
-
-    if (!digitalRead(AXIS_X_PIN)) { current_axis = AXIS_X; axis_name = "X"; axis_selected = true; }
-    else if (!digitalRead(AXIS_Y_PIN)) { current_axis = AXIS_Y; axis_name = "Y"; axis_selected = true; }
-    else if (!digitalRead(AXIS_Z_PIN)) { current_axis = AXIS_Z; axis_name = "Z"; axis_selected = true; }
-    else if (!digitalRead(AXIS_A_PIN)) { current_axis = AXIS_A; axis_name = "A"; axis_selected = true; }
-    else { current_axis = AXIS_NONE; axis_name = "NONE"; }
-
-    digitalWrite(LED_PIN, axis_selected ? HIGH : LOW);
-}
-
 void check_encoder() {
     int16_t count = 0;
     pcnt_get_counter_value(PCNT_UNIT, &count);
@@ -137,7 +121,35 @@ void loop() {
     static unsigned long last_debug_time = 0;
     unsigned long now = millis();
 
-    update_switches();
+    static Axis last_stable_axis = AXIS_NONE;
+    static unsigned long axis_change_time = 0;
+    const unsigned long axis_debounce_delay = 50;
+
+    if (!digitalRead(MULT_X1_PIN)) current_multiplier = 1;
+    else if (!digitalRead(MULT_X10_PIN)) current_multiplier = 10;
+    else if (!digitalRead(MULT_X100_PIN)) current_multiplier = 100;
+
+    Axis new_axis = AXIS_NONE;
+    if (!digitalRead(AXIS_X_PIN)) new_axis = AXIS_X;
+    else if (!digitalRead(AXIS_Y_PIN)) new_axis = AXIS_Y;
+    else if (!digitalRead(AXIS_Z_PIN)) new_axis = AXIS_Z;
+    else if (!digitalRead(AXIS_A_PIN)) new_axis = AXIS_A;
+
+    if (new_axis != last_stable_axis) {
+        axis_change_time = now;
+        last_stable_axis = new_axis;
+    }
+
+    if ((now - axis_change_time) > axis_debounce_delay && current_axis != last_stable_axis) {
+        current_axis = last_stable_axis;
+        axis_name = (current_axis == AXIS_X) ? "X" :
+                    (current_axis == AXIS_Y) ? "Y" :
+                    (current_axis == AXIS_Z) ? "Z" :
+                    (current_axis == AXIS_A) ? "A" : "NONE";
+    }
+
+    // Update LED status
+    digitalWrite(LED_PIN, current_axis != AXIS_NONE ? HIGH : LOW);
 
     if (raw_estop_signal) {
         raw_estop_signal = false;
@@ -156,6 +168,7 @@ void loop() {
                 grblSerial.write(0x94);
 
                 // Test for status response
+                // Serial.println("?");
                 // grblSerial.write('?');
             }
         }
@@ -174,17 +187,36 @@ void loop() {
         return;
     }
 
+    static Axis last_axis = AXIS_NONE;
     bool axis_selected = (current_axis != AXIS_NONE);
-    if (axis_selected && mpg_state == IDLE) {
-        grblSerial.write(0x8B);
-        mpg_state = READY;
-    } else if (!axis_selected && mpg_state == READY) {
-        grblSerial.write(0x8B);
-        mpg_state = IDLE;
+
+    // Only take action when axis selection actually changes
+    if (current_axis != last_axis) {
+        if (current_axis != AXIS_NONE && mpg_state == IDLE) {
+            grblSerial.write(0x8B);  // Enter MPG mode
+            mpg_state = READY;
+        } else if (current_axis == AXIS_NONE && mpg_state == READY) {
+            grblSerial.write(0x8B);  // Exit MPG mode
+            mpg_state = IDLE;
+        }
+        last_axis = current_axis;
     }
 
     // Always run to discard any movement, but only acts when state is READY and axis selected
     check_encoder();
+
+    // Mirror data from grblSerial to Serial for debugging
+    while (grblSerial.available()) {
+        uint8_t b = grblSerial.read();
+        if (isPrintable(b)) {
+            Serial.write(b);
+        } else {
+            Serial.print("[0x");
+            if (b < 0x10) Serial.print("0");
+            Serial.print(b, HEX);
+            Serial.print("]");
+        }
+    }
 
 #if DEBUG_OUTPUT
     if (now - last_debug_time > 500) {
